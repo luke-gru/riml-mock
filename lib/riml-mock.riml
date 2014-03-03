@@ -1,0 +1,208 @@
+class g:Mock
+  def initialize(name = 'mock')
+    self.name = name
+    self.previously_expected_method_name = ''
+    " some methods can't be called after others. Enforcing the order of calls
+    " eases API readability and implementation.
+    self.current_call_chain = []
+    self.expected_calls = []
+    self.actual_calls = []
+    self.satisfied_expectations = []
+    self.unsatisfied_expectations = []
+  end
+
+  " @returns Mock
+  defm expects(method_name)
+    add(self.expected_calls, { 'name' : method_name })
+    def s:mocked_{method_name}(*args) dict
+      try
+        " we don't have access to the outer `method_name` var, so we have to do this
+        throw 'find current method name'
+      catch
+        let thr = v:throwpoint
+        let method_name = substitute(matchstr(thr, 'mocked_\w*'), 'mocked_', '', '')
+      endtry
+      return self.method_called(method_name, args)
+    end
+    self[method_name] = function("s:mocked_#{method_name}")
+    self.previously_expected_method_name = method_name
+    self.current_call_chain = ['expects']
+    return self
+  end
+
+  " call after `expects`
+  " ex: m.expects('someMethod').with('someArg', 'otherArg')
+  " @throws 'MockError' if no previous `expects` was called for current obj.
+  " @throws 'MockError' if `returns` was called before `with` in the current call chain
+  " @returns Mock
+  defm with(args)
+    self.expect_args(args)
+    add(self.current_call_chain, 'with')
+    return self
+  end
+
+  " call after `expects`
+  " ex: m.expects('someMethod').with('someArg', 'otherArg').returns({})
+  " @throws 'MockError' if no previous `expects` was called for current obj.
+  " @returns Mock
+  defm returns(obj)
+    self.return_for_expectation(obj)
+    add(self.current_call_chain, 'returns')
+    return self
+  end
+
+  " @throws 'MockError' if no previous `expects` was called for current obj.
+  " @returns Mock
+  defm times(num)
+    self.expect_num_calls(num)
+    add(self.current_call_chain, 'times')
+    return self
+  end
+
+  " @returns Mock
+  " @throws 'MockError' if no previous `expects` was called for current obj.
+  defm once()
+    return self.times(1)
+  end
+
+  " @returns Mock
+  " @throws 'MockError' if no previous `expects` was called for current obj.
+  defm twice()
+    return self.times(2)
+  end
+
+  " @returns Mock
+  " @throws 'MockError' if no previous `expects` was called for current obj.
+  defm never()
+    return self.times(0)
+  end
+
+  " @throws 'ExpectationError' if 1 or more expectations were not met
+  " @returns true if all expectations met
+  defm satisfy()
+    " get actual calls that differ from expected calls
+    for expected in self.expected_calls
+      for actual in self.actual_calls
+        if expected.name != actual.name
+          continue
+        end
+        self.satisfy_expectation(actual, expected)
+      end
+    end
+    " get expected methods that weren't ever called
+    actual_called_method_names = map(copy(self.actual_calls), 'v:val["name"]')
+    for expected in self.expected_calls
+      if index(actual_called_method_names, expected.name) == -1
+        self.never_called(expected)
+      end
+    end
+
+    " report and throw error, if necessary
+    if len(self.unsatisfied_expectations) > 0
+      for msg in self.unsatisfied_expectations
+        echomsg msg
+      end
+      throw "ExpectationError: unsatisfied expectation(s)"
+    end
+    " all expectations satisfied
+    return true
+  end
+
+    " TODO: make messages better
+    def satisfy_expectation(actual, expected)
+      if self.satisfied_num_calls_expectation(actual, expected) && self.satisfied_args_expectation(actual, expected)
+        add(self.satisfied_expectations, "Satisfied expectation: method #{actual.name}, " .
+              \ "calls: #{actual.times}, args: #{join(actual.args, ', ')}")
+      else
+        add(self.unsatisfied_expectations, "Unsatisfied expectation: method #{actual.name}, " .
+              \ "calls: #{actual.times}, args: #{join(actual.args, ', ')}")
+      end
+    end
+
+    " TODO: make messages better
+    def never_called(expected)
+      msg = "Unsatisfied expectation: method #{expected.name} was never called."
+      add(self.unsatisfied_expectations, msg)
+    end
+
+    def satisfied_num_calls_expectation(actual, expected)
+      return (has_key(expected, 'times') && expected.times == actual.times) ||
+            \ !has_key(expected, 'times')
+    end
+
+    def satisfied_args_expectation(actual, expected)
+      if has_key(expected, 'args')
+        return actual.args == expected.args
+      else
+        return true
+      end
+    end
+
+    " @returns value that current object specified in `returns()`, if any
+    def method_called(method_name, args)
+      added = false
+      for actual in self.actual_calls
+        if actual.name != method_name || actual.args != args
+          continue
+        end
+        actual.times += 1
+        added = true
+        break
+      end
+      " FIXME: (vim-riml) indentation with 'unless'
+      unless added
+        add(self.actual_calls, { 'name' : method_name, 'args' : args, 'times' : 1 })
+      end
+      " find value to return, if any
+      for expected in self.expected_calls
+        if has_key(expected, 'args') && expected.args != args
+          return
+        else
+          if has_key(expected, 'returns')
+            return expected.returns
+          else
+            return
+          end
+        end
+      end
+    end
+
+    " @throws 'MockError' if no previous `expects` was called for current obj.
+    def expect_num_calls(num)
+      if self.previously_expected_method_name == ''
+        self.throw_mock_error("expects() must be called before times(), once() or never()")
+      end
+      for d in self.expected_calls
+        if d.name == self.previously_expected_method_name
+          d.times = num
+          break
+        end
+      end
+    end
+
+    " @throws 'MockError' if no previous `expects` was called for current obj.
+    " @throws 'MockError' if `returns` was called before `with` in the current call chain
+    def expect_args(args)
+      if self.previously_expected_method_name == ''
+        self.throw_mock_error("expects() must be called before with()")
+      end
+      if index(self.current_call_chain, 'returns') != -1
+        self.throw_mock_error("with() must be called before returns()")
+      end
+      last_expected_info = self.expected_calls[-1]
+      last_expected_info.args = args
+    end
+
+    " @throws 'MockError' if no previous `expects` was called for current obj.
+    def return_for_expectation(obj)
+      if self.previously_expected_method_name == ''
+        self.throw_mock_error("expects() must be called before returns()")
+      end
+      current_expectation = self.expected_calls[-1]
+      current_expectation.returns = obj
+    end
+
+    def throw_mock_error(msg)
+      throw "MockError: #{msg}"
+    end
+end

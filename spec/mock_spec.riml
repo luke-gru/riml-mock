@@ -1,0 +1,112 @@
+riml_include 'dsl.riml'
+riml_include 'riml-mock.riml'
+
+class MockSpec
+  defm describe
+    return 'Mock Spec'
+  end
+
+  defm it_can_expect_a_method_and_have_it_called
+    m = new g:Mock()
+    m.expects('omg')
+    expect(m).to_have_key('omg')
+    expect(m.omg()).to_equal(0)
+  end
+
+  defm it_can_expect_a_method_with_args
+    m = new g:Mock()
+    ret = m.expects('method').with(['arg1', 'arg2'])
+    expect(ret).to_equal(m)
+    expect(m.expected_calls[0]['args']).to_equal(['arg1', 'arg2'])
+  end
+
+  defm it_can_expect_a_method_n_times
+    m = new g:Mock()
+    m.expects('method').times(2)
+    expect(m.expected_calls[0]['times']).to_equal(2)
+  end
+
+  defm it_can_specify_return_value
+    m = new g:Mock()
+    obj = { 'key' : 'val' }
+    m.expects('method').returns(obj)
+    expect(m.expected_calls[0]['returns']).to_equal(obj)
+  end
+
+  defm it_returns_the_correct_value_if_specified_return
+    m = new g:Mock()
+    obj = { 'key' : 'val' }
+    m.expects('method').returns(obj)
+    ret = m.method()
+    expect(ret).to_equal(obj)
+  end
+
+  defm it_can_satisfy_a_simple_expectation
+    m = new g:Mock()
+    m.expects('method1').with(['arg1'])
+    m.method1('arg1')
+    ret = m.satisfy()
+    expect(ret).to_equal(true)
+  end
+
+  defm it_throws_ExpectationError_when_one_expectation_isnt_met
+    m = new g:Mock()
+    m.expects('method1').with(['good arg'])
+    m.method1('bad arg')
+    try
+      m.satisfy() " throws error
+      throw "shouldn't get here"
+    catch /ExpectationError/
+      expect(len(m.unsatisfied_expectations)).to_equal(1)
+    end
+  end
+
+  defm it_can_have_multiple_unsatisfied_expectations
+    m = new g:Mock()
+    m.expects('method1')
+    m.expects('method2')
+    m.expects('method3')
+    m.method3('arg')
+    try
+      m.satisfy() " throws error
+      throw "shouldn't get here"
+    catch /ExpectationError/
+      expect(len(m.unsatisfied_expectations)).to_equal(2)
+      expect(len(m.satisfied_expectations)).to_equal(1)
+    end
+  end
+
+  defm it_can_have_multiple_expectations_for_the_same_method_name
+    m = new g:Mock()
+    m.expects('method1').with(['arg1'])
+    m.expects('method1').with(['arg2'])
+
+    m.method1('arg2')
+    try
+      m.satisfy() " throws error
+      throw "shouldn't get here"
+    catch /ExpectationError/
+      expect(len(m.unsatisfied_expectations)).to_equal(1)
+      expect(len(m.satisfied_expectations)).to_equal(1)
+    end
+  end
+
+  defm it_throws_MockError_if_with_before_expects
+    m = new g:Mock()
+    try
+      m.with(['arg1']).expects('method1')
+      throw "shouldn't get here"
+    catch
+    end
+  end
+
+  defm it_throws_MockError_if_with_after_returns
+    m = new g:Mock()
+    try
+      m.returns({}).with(['arg1'])
+      throw "shouldn't get here"
+    catch
+    end
+  end
+
+end
