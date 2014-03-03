@@ -172,12 +172,8 @@ class g:Mock
       if self.previously_expected_method_name == ''
         self.throw_mock_error("expects() must be called before times(), once() or never()")
       end
-      for d in self.expected_calls
-        if d.name == self.previously_expected_method_name
-          d.times = num
-          break
-        end
-      end
+      current_expectation = self.expected_calls[-1]
+      current_expectation.times = num
     end
 
     " @throws 'MockError' if no previous `expects` was called for current obj.
@@ -189,8 +185,8 @@ class g:Mock
       if index(self.current_call_chain, 'returns') != -1
         self.throw_mock_error("with() must be called before returns()")
       end
-      last_expected_info = self.expected_calls[-1]
-      last_expected_info.args = args
+      current_expectation = self.expected_calls[-1]
+      current_expectation.args = args
     end
 
     " @throws 'MockError' if no previous `expects` was called for current obj.
